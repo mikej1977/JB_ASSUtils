@@ -69,7 +69,7 @@ function JB_ASSUtils.SelectSingleSquare(worldObjects, playerObj, callbackFunc, .
         Events.OnMouseUp.Remove(mouseUpOne)
         selectedSquare = square
         if callbackFunc then
-            return callbackFunc(playerObj, worldObjects, selectedSquare, args)
+            return callbackFunc(playerObj, worldObjects, selectedSquare, unpack(args))
         else
             return selectedSquare
         end
@@ -118,7 +118,7 @@ function JB_ASSUtils.SelectArea(worldObjects, playerObj, callbackFunc, ...)
         draggingArea = false
         table.insert(selectedArea, { minX = minX, minY = minY, maxX = maxX, maxY = maxY, z = areaZ, areaWidth = areaWidth, areaHeight = areaHeight, numSquares = #selectedArea })
         if callbackFunc then
-            return callbackFunc(playerObj, worldObjects, selectedArea, args)
+            return callbackFunc(playerObj, worldObjects, selectedArea, unpack(args))
         else
             return selectedArea
         end
@@ -143,7 +143,7 @@ function JB_ASSUtils.SelectArea(worldObjects, playerObj, callbackFunc, ...)
 end
 
 function JB_ASSUtils.SelectSquareAndArea(worldObjects, playerObj, callbackFunc, ...)
-    local args = {...}
+    local args = { ... }
     local mouseDownOne, mouseDownTwo, mouseUpOne, mouseUpTwo, onTickEvent
     local selectedSquare
     local selectedArea = { squares = {} }
@@ -186,7 +186,7 @@ function JB_ASSUtils.SelectSquareAndArea(worldObjects, playerObj, callbackFunc, 
         draggingArea = false
         table.insert(selectedArea, { minX = minX, minY = minY, maxX = maxX, maxY = maxY, areaWidth = areaWidth, areaHeight = areaHeight, numSquares = #selectedArea })
         if callbackFunc then
-            return callbackFunc(playerObj, worldObjects, selectedSquare, selectedArea, args)
+            return callbackFunc(playerObj, worldObjects, selectedSquare, selectedArea, unpack(args))
         else
             return selectedSquare, selectedArea
         end
@@ -284,6 +284,175 @@ function JB_ASSUtils.SortSquaresClosest(playerObj, squares)
         table.remove(squares, tableIndex)
     end
     return sortedSquares
+end
+
+function JB_ASSUtils.SelectLines(worldObjects, playerObj, callbackFunc, ...)
+    local args = { ... }
+    local mouseDownOne, mouseUpOne, mouseUpTwo, onTickEvent
+    local selectedLines = { lineX = {}, lineY = {} }
+    local draggingArea
+    local startX, startY, endX, endY, areaZ
+    local highlightColorData = JB_ASSUtils.GetPickedColor(playerObj)
+    mouseDownOne = function() -- only "I" can prevent misfires
+        Events.OnMouseDown.Remove(mouseDownOne)
+        Events.OnMouseUp.Add(mouseUpOne)
+    end
+    mouseUpOne = function()
+        Events.OnMouseUp.Remove(mouseUpOne)
+        startX, startY, areaZ = JB_ASSUtils.GetMouseCoords(playerObj)
+        draggingArea = true
+        Events.OnMouseDown.Add(mouseUpTwo)
+    end
+    mouseUpTwo = function()
+        Events.OnMouseUp.Remove(mouseUpTwo)
+        Events.OnTick.Remove(onTickEvent)
+        local minX, maxX = math.min(startX, endX), math.max(startX, endX)
+        local minY, maxY = math.min(startY, endY), math.max(startY, endY)
+        -- do lineX
+        for x = minX, maxX do
+            local square = getSquare(x, startY, areaZ)
+            table.insert(selectedLines.lineX, square)
+        end
+        -- do lineY
+        for y = minY, maxY do
+            local square = getSquare(endX, y, areaZ)
+            table.insert(selectedLines.lineY, square)
+        end
+
+        draggingArea = false
+
+        if callbackFunc then
+            return callbackFunc(playerObj, worldObjects, selectedLines, unpack(args))
+        else
+            return selectedLines
+        end
+    end
+    onTickEvent = function()
+        if JB_ASSUtils.CancelActions(playerObj) then
+            -- cancel this shit
+            Events.OnTick.Remove(onTickEvent)
+            Events.OnMouseDown.Remove(mouseDownOne)
+            Events.OnMouseUp.Remove(mouseUpOne)
+            Events.OnMouseUp.Remove(mouseUpTwo)
+            return nil
+        end
+        endX, endY = JB_ASSUtils.GetMouseCoords(playerObj)
+        if not draggingArea then
+            JB_ASSUtils.HighlightMouseSquare(playerObj, highlightColorData)
+        end
+        if selectedSquare then
+            JB_ASSUtils.HighlightSquare(playerObj, selectedSquare, highlightColorData)
+        end
+        if draggingArea then
+            -- highlight x line
+            JB_ASSUtils.HighlightArea(playerObj, startX, startY, endX, startY, areaZ, highlightColorData)
+            -- highlight y line
+            JB_ASSUtils.HighlightArea(playerObj, endX, startY, endX, endY, areaZ, highlightColorData)
+        end
+    end
+    Events.OnMouseDown.Add(mouseDownOne)
+    Events.OnTick.Add(onTickEvent)
+end
+
+function JB_ASSUtils.SelectLine(worldObjects, playerObj, callbackFunc, ...)
+    local args = { ... }
+    local mouseDownEvent, mouseUpEvent, onTickEvent
+    local selectedLine = {}
+    local draggingLine = false
+    local highlightColorData = JB_ASSUtils.GetPickedColor(playerObj)
+    local startX, startY, endX, endY, areaZ, startSq
+
+    mouseDownEvent = function()
+        Events.OnMouseDown.Remove(mouseDownEvent)
+        Events.OnMouseUp.Add(mouseUpEvent)
+        startX, startY, areaZ = JB_ASSUtils.GetMouseCoords(playerObj)
+        draggingLine = true
+        startSq = getSquare(startX, startY, areaZ)
+        Events.OnTick.Add(onTickEvent)
+    end
+
+    onTickEvent = function()
+        endX, endY = JB_ASSUtils.GetMouseCoords(playerObj)
+
+        local dx = math.abs(endX - startX)
+        local dy = math.abs(endY - startY)
+        local sx = startX < endX and 1 or -1
+        local sy = startY < endY and 1 or -1
+        local err = dx - dy
+
+        local x, y = startX, startY
+
+        table.wipe(selectedLine)
+        while true do
+            local square = getSquare(x, y, areaZ)
+            if square then
+                table.insert(selectedLine, square)
+            end
+
+            if x == endX and y == endY then break end
+            local e2 = 2 * err
+            if e2 > -dy then
+                err = err - dy
+                x = x + sx
+            end
+            if e2 < dx then
+                err = err + dx
+                y = y + sy
+            end
+        end
+
+        if selectedLine then
+            for _, sq in ipairs(selectedLine) do
+                JB_ASSUtils.HighlightSquare(playerObj, sq, highlightColorData)
+                --JB_ASSUtils.HighlightArea(playerObj, startX, startY, endX, startY, areaZ, highlightColorData)
+            end
+        end
+        if startSq then
+            JB_ASSUtils.HighlightSquare(playerObj, startSq, highlightColorData)
+        end
+    end
+
+    mouseUpEvent = function()
+        Events.OnMouseUp.Remove(mouseUpEvent)
+        Events.OnTick.Remove(onTickEvent)
+
+        endX, endY = JB_ASSUtils.GetMouseCoords(playerObj)
+        draggingLine = false
+
+        local dx = math.abs(endX - startX)
+        local dy = math.abs(endY - startY)
+        local sx = startX < endX and 1 or -1
+        local sy = startY < endY and 1 or -1
+        local err = dx - dy
+
+        local x, y = startX, startY
+
+        while true do
+            local square = getSquare(x, y, areaZ)
+            if square then
+                table.insert(selectedLine, square)
+            end
+
+            if x == endX and y == endY then break end
+            local e2 = 2 * err
+            if e2 > -dy then
+                err = err - dy
+                x = x + sx
+            end
+            if e2 < dx then
+                err = err + dx
+                y = y + sy
+            end
+        end
+
+        if callbackFunc then
+            return callbackFunc(playerObj, worldObjects, selectedLine, unpack(args))
+        else
+            return selectedLine
+        end
+    end
+
+    Events.OnMouseDown.Add(mouseDownEvent)
 end
 
 return JB_ASSUtils -- hell ya
